@@ -2,7 +2,7 @@ import streamlit as st
 from PIL import Image
 import io
 import os
-from config import fetch_images, delete_image_from_db  # Assuming you have a delete function
+from config import fetch_images
 import torch
 from torchvision import transforms
 from model import SiameseNetworkBCE
@@ -52,7 +52,7 @@ def compare_faces(model, image1, image2, threshold=0.5):
     st.write(f"Similarity score: {similarity_score}")
     
     # Check if faces match based on a threshold
-    if similarity_score >= threshold:
+    if similarity_score <= threshold:
         st.success("The faces match!")
     else:
         st.error("The faces do not match.")
