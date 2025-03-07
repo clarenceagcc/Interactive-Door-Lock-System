@@ -5,7 +5,7 @@ def get_connection():
     return mariadb.connect(
         host="localhost",
         user="root",       # Change if needed
-        password="admin",  # Change if needed
+        password="84010012",  # Change if needed
     )
 
 # Function to create database and table if not exists
@@ -37,7 +37,7 @@ def delete_image_from_db(img_id):
     conn = mariadb.connect(
         host="localhost",
         user="root",
-        password="admin",
+        password="84010012",
         database="image_db"
     )
     cursor = conn.cursor()
@@ -47,27 +47,27 @@ def delete_image_from_db(img_id):
     conn.close()
 
 # Function to save an image to the database
-def save_image_to_db(image_file):
+def save_image_to_db(image_data):
     conn = mariadb.connect(
         host="localhost",
         user="root",
-        password="admin",
+        password="84010012",
         database="image_db"
     )
     cursor = conn.cursor()
-    image_data = image_file.read()
     query = "INSERT INTO images (name, image) VALUES (%s, %s)"
-    cursor.execute(query, (image_file.name, image_data))
+    cursor.execute(query, ("Captured Image", image_data))
     conn.commit()
     cursor.close()
     conn.close()
+
 
 # Function to fetch images from the database
 def fetch_images():
     conn = mariadb.connect(
         host="localhost",
         user="root",
-        password="admin",
+        password="84010012",
         database="image_db"
     )
     cursor = conn.cursor()

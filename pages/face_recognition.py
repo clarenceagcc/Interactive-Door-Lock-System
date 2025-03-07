@@ -83,4 +83,3 @@ if camera:
     if image1 is not None:
         compare_faces(model, image1, image2)
 
-
