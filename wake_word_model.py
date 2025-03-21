@@ -34,7 +34,8 @@ camera_label.pack()
 def start_camera():
     global cap
     if cap is None or not cap.isOpened():
-        cap = cv2.VideoCapture(0)  # Change to 1 if using an external camera
+        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        #cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
         update_camera_feed()
@@ -51,19 +52,23 @@ def update_camera_feed():
         root.after(10, update_camera_feed)  # Ensure Tkinter updates the UI
 
 # --- Face Registration ---
+def open_face_camera():
+    global cap
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
+
+
 def register_face():
     global cap, face_window
     audio_paused.set()  # Pause audio thread
 
-    # Release the main camera feed to avoid conflicts
     if cap is not None and cap.isOpened():
         cap.release()
+        cv2.destroyAllWindows()
         cap = None  
 
-    cap = cv2.VideoCapture(0)
-    #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
+    root.withdraw()  # Hide the main window
 
     face_window = tk.Toplevel(root)
     face_window.title("Face Registration")
@@ -77,6 +82,11 @@ def register_face():
     close_button = tk.Button(face_window, text="Close", command=close_face_registration)
     close_button.pack(pady=10)
 
+    # Run camera feed in a separate thread
+    thread = Thread(target=open_face_camera)
+    thread.daemon = True
+    thread.start()
+
     update_face_feed(face_label)
 
 def update_face_feed(face_label):
@@ -89,9 +99,26 @@ def update_face_feed(face_label):
                 imgtk = ImageTk.PhotoImage(image=img)
                 face_label.imgtk = imgtk
                 face_label.configure(image=imgtk)
-        face_window.after(10, lambda: update_face_feed(face_label))
+
+        if face_window.winfo_exists():  # Double-check before scheduling the next update
+            face_window.after(10, lambda: update_face_feed(face_label))
+
+
+def close_face_registration():
+    global cap, face_window
+    if face_window.winfo_exists():
+        face_window.destroy()
+    
+    if cap is not None:
+        cap.release()
+        cv2.destroyAllWindows()
+        cap = None  # Avoid using a released camera
+
+    audio_paused.clear()  # Resume audio detection
+
 
 def save_face():
+    global face_window
     if cap is not None and cap.isOpened():
         ret, frame = cap.read()
         if ret:
@@ -99,13 +126,12 @@ def save_face():
             cv2.imwrite(face_filename, frame)
             print(f"Face saved as {face_filename}")
 
-def close_face_registration():
-    global cap, face_window
-    if face_window.winfo_exists():  # Ensure window exists before closing
-        face_window.destroy()
+    # Ensure the face_window is properly closed
+    if face_window:
+        face_window.destroy()  # Close the registration window
 
-    # Don't release the camera, just return to the main feed
-    audio_paused.clear()  # Resume audio detection
+    root.deiconify()  # Show the main window again
+
 
 # --- Display Saved Faces ---
 def display_saved_faces():
