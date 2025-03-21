@@ -11,6 +11,8 @@ import cv2
 from PIL import Image, ImageTk
 import os
 
+sd.default.device=1
+
 # --- Tkinter GUI Setup ---
 root = tk.Tk()
 root.title("Wake Word Detection with Camera Feed")
@@ -32,7 +34,7 @@ camera_label.pack()
 def start_camera():
     global cap
     if cap is None or not cap.isOpened():
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Change to 1 if using an external camera
+        cap = cv2.VideoCapture(0)  # Change to 1 if using an external camera
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
         update_camera_feed()
@@ -58,7 +60,8 @@ def register_face():
         cap.release()
         cap = None  
 
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)
+    #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
 
