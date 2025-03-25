@@ -10,13 +10,23 @@ from threading import Thread, Event
 import cv2
 from PIL import Image, ImageTk
 import os
+import insightface
+from insightface.app import FaceAnalysis
+from scipy.spatial.distance import cosine
 
-sd.default.device=1
+sd.default.device=0
+wake_word_detected=False
+audio_stream = None
 
 # --- Tkinter GUI Setup ---
 root = tk.Tk()
 root.title("Wake Word Detection with Camera Feed")
-audio_paused = Event()  # Event to control audio thread pause
+#audio_paused = Event()  # Event to control audio thread pause
+
+# --- InsightFace Initialization ---
+app = FaceAnalysis(name="buffalo_l", providers=['CPUExecutionProvider'])
+app.prepare(ctx_id=0, det_size=(640, 640))
+print("Buffalo I model loaded successfully!")
 
 # Camera settings
 webcam_resolution = (640, 480)
@@ -34,14 +44,15 @@ camera_label.pack()
 def start_camera():
     global cap
     if cap is None or not cap.isOpened():
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        #cap = cv2.VideoCapture(0)
+        #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
         update_camera_feed()
 
 def update_camera_feed():
-    if cap is not None and cap.isOpened():
+    global cap
+    if cap is not None and cap.isOpened(): #check if cap is valid.
         ret, frame = cap.read()
         if ret:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -49,20 +60,23 @@ def update_camera_feed():
             imgtk = ImageTk.PhotoImage(image=img)
             camera_label.imgtk = imgtk
             camera_label.configure(image=imgtk)
-        root.after(10, update_camera_feed)  # Ensure Tkinter updates the UI
+        root.after(10, update_camera_feed)
 
 # --- Face Registration ---
 def open_face_camera():
     global cap
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    #cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, webcam_resolution[0])
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, webcam_resolution[1])
 
 
 def register_face():
-    global cap, face_window
-    audio_paused.set()  # Pause audio thread
-
+    global cap, face_window, wake_word_detected
+    print(wake_word_detected)
+    if not wake_word_detected:
+        stop_audio_stream()  # Pause audio thread
+        
     if cap is not None and cap.isOpened():
         cap.release()
         cv2.destroyAllWindows()
@@ -105,33 +119,44 @@ def update_face_feed(face_label):
 
 
 def close_face_registration():
-    global cap, face_window
+    global cap, face_window, wake_word_detected
+    print(wake_word_detected)
     if face_window.winfo_exists():
         face_window.destroy()
-    
+
     if cap is not None:
         cap.release()
         cv2.destroyAllWindows()
         cap = None  # Avoid using a released camera
-
-    audio_paused.clear()  # Resume audio detection
-
+    
+    if not wake_word_detected:
+        start_audio_stream()  # Resume audio detection
+    else:
+        start_camera()
+        
+    root.deiconify()  # Show the main window again
 
 def save_face():
-    global face_window
+    global cap, face_window, wake_word_detected
+    print(wake_word_detected)
     if cap is not None and cap.isOpened():
         ret, frame = cap.read()
         if ret:
-            face_filename = f"saved_faces/face_{len(os.listdir('saved_faces')) + 1}.png"
+            face_filename = f"saved_faces/face_1.png"
             cv2.imwrite(face_filename, frame)
             print(f"Face saved as {face_filename}")
+            cap.release()
 
     # Ensure the face_window is properly closed
     if face_window:
         face_window.destroy()  # Close the registration window
-
+    
+    if not wake_word_detected:
+        start_audio_stream()  # Resume audio detection
+    else:
+        start_camera()
+        
     root.deiconify()  # Show the main window again
-
 
 # --- Display Saved Faces ---
 def display_saved_faces():
@@ -204,15 +229,59 @@ def detect_wake_word(audio_data):
     with torch.no_grad():
         output = wake_word_model(mel_spec)
         return torch.sigmoid(output).item()  # Sigmoid for probability
+        
+# --- Facial Detection ---
+def recognize_face(frame):
+    saved_face_img = cv2.imread("saved_faces/face_1.png")
+    if saved_face_img is None:
+        print("Could not load saved face.")
+        return
+
+    saved_face = app.get(saved_face_img)
+    if not saved_face:
+        print("No face found in saved image.")
+        return
+
+    saved_embedding = saved_face[0]['embedding']
+
+    faces = app.get(frame)
+    if faces:
+        for face in faces:
+            embedding = face['embedding']
+            dist = cosine(embedding, saved_embedding)
+            if dist < 0.3: #threshold, modify as needed.
+                print("Face Recognized!")
+                bbox = face['bbox'].astype(int)
+                cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
+            else:
+                print("Face not recognized.")
+    return frame
+    
+# --- Facial Detection and Recognition ---
+def perform_face_recognition():
+    global cap, wake_word_detected
+    if cap is not None and cap.isOpened():
+        ret, frame = cap.read()
+        if ret:
+            frame = recognize_face(frame)
+            # Show the result in a new window
+            face_result_window = tk.Toplevel(root)
+            face_result_window.title("Face Recognition Result")
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(frame)
+            imgtk = ImageTk.PhotoImage(image=img)
+            result_label = tk.Label(face_result_window, image=imgtk)
+            result_label.imgtk = imgtk
+            result_label.configure(image=imgtk)
+            result_label.pack()
+    wake_word_detected = False  # Reset wake word flag
+
 
 # --- Audio Callback ---
 def callback(indata, frames, time, status):
-    global audio_buffer
+    global audio_buffer, wake_word_detected
     if status:
         print(f"Audio callback error: {status}")
-    
-    if audio_paused.is_set():
-        return  # Pause audio detection when registering a face
 
     audio_buffer[:-frames] = audio_buffer[frames:]
     audio_buffer[-frames:] = indata[:, 0]
@@ -221,15 +290,32 @@ def callback(indata, frames, time, status):
     print(f"Wake word probability: {prediction}")
 
     if prediction > THRESHOLD:
-        print("Wake word detected! Starting camera...")
+        wake_word_detected = True
+        print("Wake word detected! Scanning face...")
+        stop_audio_stream()
         root.after(0, start_camera)
+        print("Scanning face...")
+        root.after(3000, perform_face_recognition)  # 3 second delay.
+        
+# --- audio threading --- #
 
-# --- Start Audio Stream ---
 def start_audio_stream():
-    stream = sd.InputStream(callback=callback, channels=1, samplerate=SAMPLE_RATE, blocksize=BUFFER_SIZE)
-    stream.start()  # Start non-blocking stream
-    print("Listening for wake word...")
+    global audio_stream
+    try:
+        audio_stream = sd.InputStream(callback=callback, channels=1, samplerate=SAMPLE_RATE, blocksize=BUFFER_SIZE)
+        audio_stream.start()
+        print("Listening for wake word...")
+    except Exception as e:
+        print(f"Error starting audio stream: {e}")
 
+def stop_audio_stream():
+    global audio_stream
+    if audio_stream is not None:
+        audio_stream.stop()
+        audio_stream.close()
+        audio_stream = None  # Clear the stream object
+        print("Audio stream stopped.")
+        
 # --- Add Buttons ---
 button_frame = tk.Frame(root)
 button_frame.pack()
@@ -246,8 +332,8 @@ if __name__ == "__main__":
     label = tk.Label(root, text="Waiting for wake word...")
     label.pack(pady=10)
 
-    Thread(target=start_audio_stream, daemon=True).start()  # Run audio in separate thread
-
+    Thread(target=start_audio_stream, daemon=True).start()
+    
     root.mainloop()
 
     if cap is not None and cap.isOpened():
