@@ -13,6 +13,10 @@ import os
 import insightface
 from insightface.app import FaceAnalysis
 from scipy.spatial.distance import cosine
+from door_lock import DoorLock
+import RPi.GPIO as GPIO
+
+RELAY_PIN = 21
 
 sd.default.device=0
 wake_word_detected=False
@@ -233,14 +237,16 @@ def detect_wake_word(audio_data):
 # --- Facial Detection ---
 def recognize_face(frame):
     saved_face_img = cv2.imread("saved_faces/face_1.png")
+    recognized = False  # Initialize the recognition flag
+    
     if saved_face_img is None:
         print("Could not load saved face.")
-        return
+        return frame, recognized
 
     saved_face = app.get(saved_face_img)
     if not saved_face:
         print("No face found in saved image.")
-        return
+        return frame, recognized
 
     saved_embedding = saved_face[0]['embedding']
 
@@ -251,11 +257,13 @@ def recognize_face(frame):
             dist = cosine(embedding, saved_embedding)
             if dist < 0.3: #threshold, modify as needed.
                 print("Face Recognized!")
+                recognized = True # Set flag when match found
                 bbox = face['bbox'].astype(int)
                 cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
+                break
             else:
                 print("Face not recognized.")
-    return frame
+    return frame, recognized
     
 # --- Facial Detection and Recognition ---
 def perform_face_recognition():
@@ -263,7 +271,10 @@ def perform_face_recognition():
     if cap is not None and cap.isOpened():
         ret, frame = cap.read()
         if ret:
-            frame = recognize_face(frame)
+            frame, recognized = recognize_face(frame)
+            if recognized:
+                lock_system.unlock()
+                root.after(20000, lock_system.lock) #Lock after 10 seconds
             # Show the result in a new window
             face_result_window = tk.Toplevel(root)
             face_result_window.title("Face Recognition Result")
@@ -274,6 +285,7 @@ def perform_face_recognition():
             result_label.imgtk = imgtk
             result_label.configure(image=imgtk)
             result_label.pack()
+            
     wake_word_detected = False  # Reset wake word flag
 
 
@@ -328,13 +340,16 @@ display_button.pack(side=tk.LEFT, padx=10, pady=10)
 
 # --- Start Application ---
 if __name__ == "__main__":
+    lock_system = DoorLock()
     root.geometry("640x580")
     label = tk.Label(root, text="Waiting for wake word...")
     label.pack(pady=10)
 
     Thread(target=start_audio_stream, daemon=True).start()
     
-    root.mainloop()
-
-    if cap is not None and cap.isOpened():
-        cap.release()
+    try:
+        root.mainloop()
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
+        lock_system.cleanup()
