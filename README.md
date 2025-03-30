@@ -25,7 +25,7 @@ A Raspberry Pi-based electronic door lock system using facial recognition, wake 
 
 ## Hardware Requirements
 
-![Wiring Diagram](images/diagram.png)
+![Wiring Diagram](images/circuit.png)
 
 - Raspberry Pi 4 (or compatible edge computing device)
 - USB camera for facial recognition
