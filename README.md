@@ -2,6 +2,8 @@
 
 A Raspberry Pi-based electronic door lock system using facial recognition, wake word detection, and ultrasonic presence sensing for enhanced security and convenience.
 
+[Preview the DEVLOG.md to view our changes history](DEVLOG.md)
+
 ## Features
 
 - **Low-power idle mode**: System runs in energy-efficient state while waiting for potential users
