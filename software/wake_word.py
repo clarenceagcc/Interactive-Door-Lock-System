@@ -3,6 +3,7 @@ import torch.nn as nn
 import torchaudio.transforms as T
 import sounddevice as sd
 import numpy as np
+import time
 
 # Global variables
 audio_stream = None
@@ -56,6 +57,18 @@ def detect_wake_word(model, audio_data, device):
     with torch.no_grad():
         output = model(mel_spec)
         return torch.sigmoid(output).item()  # Sigmoid for probability
+    
+        # When detection happens, put an event in the queue
+    if prediction > THRESHOLD:
+        # Stop the ultrasonic sensor thread
+        stop_audio_stream()
+        
+        # Notify the main application
+        event_queue.put(("WAKEUP_WORD_DETECTED", None))
+        
+        print("Wake word detected!")
+    
+    return prediction
 
 # --- Audio Stream Control ---
 def set_callback(callback):
@@ -68,22 +81,63 @@ def start_audio_stream():
     DURATION = 1.0
     BUFFER_SIZE = int(SAMPLE_RATE * DURATION)
     
+    # Wait a bit to ensure resources are released
+    time.sleep(0.5)
+    
     try:
         audio_stream = sd.InputStream(
             callback=callback_function, 
             channels=1, 
             samplerate=SAMPLE_RATE, 
-            blocksize=BUFFER_SIZE
+            blocksize=BUFFER_SIZE,
+            device=0,  # Explicitly specify device
+            latency='high',  # Use higher latency for stability
+            dtype='float32'
         )
         audio_stream.start()
         print("Listening for wake word...")
     except Exception as e:
         print(f"Error starting audio stream: {e}")
+        # Try to reset sounddevice
+        try:
+            sd._terminate()
+            time.sleep(1)
+            sd._initialize()
+            time.sleep(0.5)
+            print("Attempted to reset sounddevice")
+            
+            # Try again with different device
+            audio_stream = sd.InputStream(
+                callback=callback_function, 
+                channels=1, 
+                samplerate=SAMPLE_RATE, 
+                blocksize=BUFFER_SIZE,
+                latency='high',
+                dtype='float32'
+            )
+            audio_stream.start()
+            print("Second attempt successful")
+        except Exception as recovery_error:
+            print(f"Recovery failed: {recovery_error}")
 
 def stop_audio_stream():
     global audio_stream
     if audio_stream is not None:
-        audio_stream.stop()
-        audio_stream.close()
-        audio_stream = None  # Clear the stream object
-        print("Audio stream stopped.")
+        try:
+            audio_stream.stop()
+            audio_stream.close()
+            print("Audio stream stopped.")
+        except Exception as e:
+            print(f"Error closing audio stream: {e}")
+        finally:
+            audio_stream = None  # Clear the stream object
+            
+            # Force sounddevice to release resources
+            try:
+                sd._terminate()
+                time.sleep(0.5)
+                sd._initialize()
+                time.sleep(0.5)
+                print("Sounddevice resources reset")
+            except Exception as e:
+                print(f"Error resetting sounddevice: {e}")

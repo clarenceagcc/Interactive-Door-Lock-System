@@ -1,5 +1,5 @@
 import tkinter as tk
-from threading import Thread
+from threading import Thread, Event
 import cv2
 from PIL import Image, ImageTk
 import os
@@ -7,16 +7,23 @@ import numpy as np
 import torch
 import sounddevice as sd
 import torchaudio.transforms as T
+import time
 
 from software.wake_word import WakeWordModel, start_audio_stream, stop_audio_stream, set_callback, detect_wake_word
 from software.face_recognition import FaceRecognition
 from hardware.door_lock import DoorLock
+from hardware.ultrasonic import UltrasonicSensor
 
 # Global variables
 wake_word_detected = False
+presence_detected = False
 cap = None
 face_window = None
 audio_stream = None
+ultrasonic_thread_running = False
+ultrasonic_stop_event = Event()
+reset_timer = None
+audio_system_busy = False
 
 # Set up audio buffer
 SAMPLE_RATE = 16000
@@ -24,6 +31,12 @@ DURATION = 1.0
 BUFFER_SIZE = int(SAMPLE_RATE * DURATION)
 audio_buffer = np.zeros(BUFFER_SIZE, dtype=np.float32)
 THRESHOLD = 0.78
+
+# Ultrasonic sensor settings
+TRIGGER_PIN = 17
+ECHO_PIN = 27
+PRESENCE_DISTANCE = 100  # Distance in cm (1m)
+PRESENCE_TIMEOUT = 180   # 3 minutes timeout in seconds
 
 # Load wake word model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -40,8 +53,130 @@ face_recognition = FaceRecognition()
 # Initialize lock system
 lock_system = DoorLock()
 
+# Initialize ultrasonic sensor
+ultrasonic_sensor = UltrasonicSensor(TRIGGER_PIN, ECHO_PIN)
+
 # Camera settings
 webcam_resolution = (640, 480)
+
+# --- Ultrasonic Sensor Thread ---
+def ultrasonic_thread():
+    global presence_detected, ultrasonic_thread_running
+    ultrasonic_thread_running = True
+    ultrasonic_stop_event.clear()
+    
+    print("Starting ultrasonic sensor thread - low power mode active")
+    status_label.config(text="Idle mode: Waiting for presence detection")
+    
+    try:
+        while not ultrasonic_stop_event.is_set():
+            distance = ultrasonic_sensor.get_distance()
+            print(f"Distance: {distance} cm")
+            
+            if distance <= PRESENCE_DISTANCE and not presence_detected:
+                presence_detected = True
+                print("Presence detected within 1m!")
+                root.after(0, presence_detected_callback)
+                break
+                
+            time.sleep(0.5)  # Reduced polling for power efficiency
+    except Exception as e:
+        print(f"Ultrasonic sensor error: {e}")
+    finally:
+        ultrasonic_thread_running = False
+        print("Ultrasonic sensor thread stopped")
+
+def start_ultrasonic_detection():
+    global ultrasonic_thread_running
+    if not ultrasonic_thread_running:
+        Thread(target=ultrasonic_thread, daemon=True).start()
+
+def stop_ultrasonic_detection():
+    global ultrasonic_stop_event
+    ultrasonic_stop_event.set()
+
+def presence_detected_callback():
+    global presence_detected, audio_system_busy
+    print("Presence detected! Starting wake word detection...")
+    status_label.config(text="Presence detected - Listening for wake word")
+    
+    # Check if audio system is busy
+    if audio_system_busy:
+        print("Audio system busy, waiting before starting...")
+        root.after(1000, presence_detected_callback)
+        return
+    
+    # Start audio detection for wake word
+    audio_system_busy = True
+    set_callback(audio_callback)
+    
+    # Use a separate thread to start audio to prevent UI freezing
+    Thread(target=lambda: safe_start_audio_stream(), daemon=True).start()
+    
+    # Set timeout for wake word detection
+    schedule_reset_timer()
+
+def safe_start_audio_stream():
+    global audio_system_busy
+    try:
+        # Force reset sounddevice before starting
+        sd._terminate()
+        time.sleep(0.5)
+        sd._initialize()
+        time.sleep(0.5)
+        
+        start_audio_stream()
+        audio_system_busy = False
+    except Exception as e:
+        print(f"Error in safe_start_audio_stream: {e}")
+        audio_system_busy = False
+        # If can't start audio, reset to idle mode
+        root.after(0, reset_to_idle_mode)
+
+def schedule_reset_timer():
+    global reset_timer
+    # Cancel any existing timer
+    if reset_timer is not None:
+        root.after_cancel(reset_timer)
+    
+    # Set a new timer to reset system after 3 minutes if no wake word
+    reset_timer = root.after(PRESENCE_TIMEOUT * 1000, reset_to_idle_mode)
+
+def reset_to_idle_mode():
+    global presence_detected, wake_word_detected, cap, reset_timer, audio_system_busy
+    
+    print("Resetting to idle mode...")
+    status_label.config(text="Resetting to idle mode")
+    
+    # Clear states
+    presence_detected = False
+    wake_word_detected = False
+    audio_system_busy = True  # Mark as busy during reset
+    
+    # Cancel timer
+    if reset_timer is not None:
+        root.after_cancel(reset_timer)
+        reset_timer = None
+    
+    # Stop any active processes
+    stop_audio_stream()
+    
+    if cap is not None and cap.isOpened():
+        cap.release()
+        cap = None
+    
+    # Reset UI
+    camera_label.config(image='')
+    
+    # Give system time to release resources
+    def delayed_restart():
+        global audio_system_busy
+        audio_system_busy = False
+        status_label.config(text="Idle mode: Waiting for presence detection")
+        start_ultrasonic_detection()
+    
+    # Delay restart to allow resources to be released
+    root.after(2000, delayed_restart)
 
 def audio_callback(indata, frames, time, status):
     global wake_word_detected, audio_buffer
@@ -58,9 +193,16 @@ def audio_callback(indata, frames, time, status):
     if prediction > THRESHOLD:
         wake_word_detected = True
         print("Wake word detected! Scanning face...")
+        status_label.config(text="Wake word detected - Starting face scan")
         stop_audio_stream()
+        
+        # Cancel reset timer
+        global reset_timer
+        if reset_timer is not None:
+            root.after_cancel(reset_timer)
+            reset_timer = None
+            
         root.after(0, start_camera)
-        print("Scanning face...")
         root.after(3000, perform_face_recognition)  # 3 second delay
 
 # --- Camera handling functions ---
@@ -92,11 +234,13 @@ def open_face_camera():
 
 # --- Face registration functions ---
 def register_face():
-    global cap, face_window, wake_word_detected
-    print(wake_word_detected)
-    if not wake_word_detected:
-        stop_audio_stream()  # Pause audio thread
-        
+    global cap, face_window, wake_word_detected, presence_detected
+    print(f"Current state - Wake word: {wake_word_detected}, Presence: {presence_detected}")
+    
+    # Stop any active detection processes
+    stop_audio_stream()
+    stop_ultrasonic_detection()
+    
     if cap is not None and cap.isOpened():
         cap.release()
         cap = None  
@@ -125,8 +269,9 @@ def register_face():
     update_face_feed(face_label)
 
 def close_face_registration():
-    global cap, face_window, wake_word_detected
-    print(wake_word_detected)
+    global cap, face_window, wake_word_detected, presence_detected
+    print(f"Current state - Wake word: {wake_word_detected}, Presence: {presence_detected}")
+    
     if face_window.winfo_exists():
         face_window.grab_release()  # Release the grab before destroying
         face_window.destroy()
@@ -135,11 +280,8 @@ def close_face_registration():
         cap.release()
         cap = None  # Avoid using a released camera
     
-    if not wake_word_detected:
-        # Make sure to restart the audio stream
-        root.after(100, start_audio_stream)  # Small delay to ensure cleanup is complete
-    else:
-        root.after(100, start_camera)  # Small delay to ensure cleanup is complete
+    # Reset to idle mode regardless of current state
+    reset_to_idle_mode()
 
 def update_face_feed(face_label):
     if face_window.winfo_exists():  # Ensure window still exists
@@ -156,8 +298,7 @@ def update_face_feed(face_label):
             face_window.after(10, lambda: update_face_feed(face_label))
 
 def save_face():
-    global cap, face_window, wake_word_detected
-    print(wake_word_detected)
+    global cap, face_window
     if cap is not None and cap.isOpened():
         ret, frame = cap.read()
         if ret:
@@ -175,35 +316,56 @@ def save_face():
         face_window.grab_release()  # Release the grab before destroying
         face_window.destroy()  # Close the registration window
     
-    if not wake_word_detected:
-        # Make sure to restart the audio stream
-        root.after(100, start_audio_stream)  # Small delay to ensure cleanup is complete
-    else:
-        root.after(100, start_camera)  # Small delay to ensure cleanup is complete
+    # Reset to idle mode
+    reset_to_idle_mode()
 
 # --- Face Recognition ---
 def perform_face_recognition():
     global cap, wake_word_detected
+    
     if cap is not None and cap.isOpened():
         ret, frame = cap.read()
         if ret:
             frame, recognized = face_recognition.recognize_face(frame)
-            if recognized:
-                lock_system.unlock()
-                root.after(5000, lock_system.lock)  # Lock after 5 seconds
+            result_text = "Face Recognized!" if recognized else "Face Not Recognized"
             
-            # Show the result in a new window
-            face_result_window = tk.Toplevel(root)
-            face_result_window.title("Face Recognition Result")
+            # Draw result on frame
+            cv2.putText(frame, result_text, (20, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, 
+                       (0, 255, 0) if recognized else (0, 0, 255), 2)
+            
+            # If recognized, unlock door
+            if recognized:
+                status_label.config(text="Face recognized - Door unlocked")
+                lock_system.unlock()
+                # Lock after 10 seconds as specified in requirements
+                root.after(10000, lock_door_and_reset)
+            else:
+                # Show countdown for 5 seconds before resetting
+                status_label.config(text="Face not recognized - Resetting in 5 seconds")
+                countdown_seconds = 5
+                start_countdown(countdown_seconds)
+            
+            # Update camera feed with recognition result
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(frame)
             imgtk = ImageTk.PhotoImage(image=img)
-            result_label = tk.Label(face_result_window, image=imgtk)
-            result_label.imgtk = imgtk
-            result_label.configure(image=imgtk)
-            result_label.pack()
-            
+            camera_label.imgtk = imgtk
+            camera_label.configure(image=imgtk)
+    
     wake_word_detected = False  # Reset wake word flag
+
+def start_countdown(seconds):
+    if seconds > 0:
+        status_label.config(text=f"Face not recognized - Resetting in {seconds} seconds")
+        root.after(1000, lambda: start_countdown(seconds - 1))
+    else:
+        reset_to_idle_mode()
+
+def lock_door_and_reset():
+    lock_system.lock()
+    status_label.config(text="Door locked - Resetting system")
+    root.after(1000, reset_to_idle_mode)
 
 def display_saved_faces():
     face_window = tk.Toplevel(root)
@@ -219,19 +381,55 @@ def display_saved_faces():
             label.image = imgtk
             label.grid(row=i // 5, column=i % 5, padx=5, pady=5)
 
+# --- Reset audio system completely ---
+def reset_audio():
+    global audio_system_busy
+    
+    status_label.config(text="Resetting audio system...")
+    audio_system_busy = True
+    
+    # Stop any existing audio stream
+    stop_audio_stream()
+    
+    # Force reset sounddevice
+    try:
+        sd._terminate()
+        time.sleep(1)
+        sd._initialize()
+        time.sleep(0.5)
+        
+        # Reset defaults
+        sd.default.device = 0
+        sd.default.channels = 1
+        sd.default.samplerate = 16000
+        
+        print("Audio system reset complete")
+        status_label.config(text="Audio system reset complete")
+        audio_system_busy = False
+        
+        # Reset to idle mode
+        root.after(1000, reset_to_idle_mode)
+    except Exception as e:
+        print(f"Error during audio reset: {e}")
+        status_label.config(text=f"Audio reset error: {e}")
+        audio_system_busy = False
+        root.after(1000, reset_to_idle_mode)
+
 # --- Main application ---
 if __name__ == "__main__":
     # Set sounddevice defaults
     sd.default.device = 0
+    sd.default.channels = 1
+    sd.default.samplerate = 16000
     
     # Set up Tkinter UI
     root = tk.Tk()
-    root.title("Wake Word Detection with Camera Feed")
-    root.geometry("640x580")
+    root.title("Smart Door Lock System")
+    root.geometry("640x680")
     
-    # Create main label
-    label = tk.Label(root, text="Waiting for wake word...")
-    label.pack(pady=10)
+    # Create status label
+    status_label = tk.Label(root, text="Initializing system...", font=("Arial", 14))
+    status_label.pack(pady=10)
     
     # Camera feed label
     camera_label = tk.Label(root)
@@ -249,15 +447,44 @@ if __name__ == "__main__":
     display_button = tk.Button(button_frame, text="Display Saved Faces", command=display_saved_faces)
     display_button.pack(side=tk.LEFT, padx=10, pady=10)
     
-    # Set up wake word detection
+    # Manual reset button
+    reset_button = tk.Button(button_frame, text="Reset System", command=reset_to_idle_mode)
+    reset_button.pack(side=tk.LEFT, padx=10, pady=10)
+    
+    # Audio reset button - Special button to force audio system reset
+    audio_reset_button = tk.Button(root, text="Reset Audio System", command=reset_audio, bg='#ffcccc')
+    audio_reset_button.pack(pady=10)
+    
+    # Status and debug info
+    audio_status = tk.Label(root, text="Audio device info:")
+    audio_status.pack(pady=5)
+    
+    try:
+        devices_info = f"Audio devices: {sd.query_devices()}"
+        device_label = tk.Label(root, text=devices_info[:80] + "...", font=("Courier", 8))
+        device_label.pack()
+    except:
+        device_label = tk.Label(root, text="Could not query audio devices", font=("Courier", 8))
+        device_label.pack()
+    
+    # Set callback for wake word detection
     set_callback(audio_callback)
     
-    # Start audio stream in a separate thread
-    Thread(target=start_audio_stream, daemon=True).start()
+    # Force reset of audio system before starting
+    sd._terminate()
+    time.sleep(0.5)
+    sd._initialize()
+    time.sleep(0.5)
+    
+    # Start the app in idle mode using the ultrasonic sensor
+    root.after(1000, start_ultrasonic_detection)
     
     try:
         root.mainloop()
     finally:
+        # Cleanup
+        stop_ultrasonic_detection()
+        stop_audio_stream()
         if cap is not None and cap.isOpened():
             cap.release()
         lock_system.cleanup()
