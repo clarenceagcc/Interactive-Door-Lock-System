@@ -58,7 +58,7 @@ pip install -r requirements.txt
 1. Clone this repository:
    ```
    git clone https://github.com/clarenceagcc/Interactive-Door-Lock-System
-   cd interactive-door-Llock-system
+   cd interactive-door-lock-system
    ```
 
 2. Install dependencies:
