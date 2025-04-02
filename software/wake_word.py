@@ -141,3 +141,27 @@ def stop_audio_stream():
                 print("Sounddevice resources reset")
             except Exception as e:
                 print(f"Error resetting sounddevice: {e}")
+
+# In wake_word.py, add these functions:
+def pause_audio_stream():
+    global audio_stream
+    if audio_stream is not None and audio_stream.active:
+        try:
+            audio_stream.stop()
+            print("Audio stream paused.")
+        except Exception as e:
+            print(f"Error pausing audio stream: {e}")
+            stop_audio_stream()  # Fall back to full stop if pause fails
+
+def resume_audio_stream():
+    global audio_stream
+    if audio_stream is not None and not audio_stream.active:
+        try:
+            audio_stream.start()
+            print("Audio stream resumed.")
+        except Exception as e:
+            print(f"Error resuming audio stream: {e}")
+            # Try to recreate the stream
+            stop_audio_stream()
+            time.sleep(1)
+            start_audio_stream()
