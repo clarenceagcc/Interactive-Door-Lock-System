@@ -52,8 +52,8 @@ THRESHOLD = 0.78
 # Ultrasonic sensor settings
 TRIGGER_PIN = 17
 ECHO_PIN = 27
-PRESENCE_DISTANCE = 50  # Distance in cm (1m)
-PRESENCE_TIMEOUT = 120   # 2 minutes timeout in seconds
+PRESENCE_DISTANCE = 50  # Distance in cm
+PRESENCE_TIMEOUT = 30   # timeout in seconds
 
 # Load wake word model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -75,6 +75,15 @@ ultrasonic_sensor = UltrasonicSensor(TRIGGER_PIN, ECHO_PIN)
 
 # Camera settings
 webcam_resolution = (640, 480)
+
+class FaceRecognition:
+    def __init__(self):
+        # Get absolute path to the saved_faces directory
+        self.faces_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_faces")
+        print(f"FaceRecognition initialized. Looking for faces in: {self.faces_dir}")
+        # Load saved faces from absolute path
+        self.load_known_faces()
+
 # --- Dashboard Thread ---
 # Create a simple HTTP server for the dashboard
 class DashboardHandler(BaseHTTPRequestHandler):
