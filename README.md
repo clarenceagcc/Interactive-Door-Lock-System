@@ -4,9 +4,9 @@ A Raspberry Pi-based electronic door lock system using facial recognition, wake 
 
 
 <div style="display: flex; justify-content: space-between; gap: 10px;">
-  <img src="images/system1.png" alt="Main UI" style="width: 10%; height: auto;"/>
-  <img src="images/system2.PNG" alt="Dashboard Main Page" style="width: 30%; height: auto;"/>
-  <img src="images/system3.PNG" alt="Dashboard_Logs" style="width: 30%; height: auto;"/>
+  <img src="images/system1.png" alt="Main UI" style="width: 90%; height: auto;"/>
+  <img src="images/system2.PNG" alt="Dashboard Main Page" style="width: 70%; height: auto;"/>
+  <img src="images/system3.PNG" alt="Dashboard_Logs" style="width: 70%; height: auto;"/>
 </div>
 
 
