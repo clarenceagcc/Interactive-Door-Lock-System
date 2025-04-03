@@ -28,3 +28,12 @@
 * **Web-Based UIs (Streamlit/Flask):** We initially explored using web-based user interfaces like Streamlit and Flask. This approach would have allowed us to leverage the processing power of our PCs instead of relying solely on the Raspberry Pi. However, we encountered concerns regarding compatibility with edge devices.
 * **Tkinter:** Ultimately, we opted for Tkinter for the user interface. Tkinter provides a simple and reliable GUI framework that is compatible with the Raspberry Pi and other edge devices, ensuring consistent performance.
     * **Threading Implementation:** Due to the need to run certain processes concurrently (like live camera feed processing, audio analysis, and sensor monitoring) without freezing the UI, we had to implement threading. This allowed us to maintain a responsive user interface while background tasks were being executed. This was especially important for the live camera display and audio analysis which would otherwise cause the UI to become unresponsive.
+ 
+## Application Jusitification
+* **Ordering of running model:** Power efficiency, because the face recognition model uses the most power compared to the wake word model. since we have to consider real world usage, if the face recognition model is being ran first, before the mic, it will consume more power.
+
+
+## limitations
+* **face recognition:** if there are multiple faces in the frame being processed, it should show unrecognized, but currently, our system doesnt do this.
+* **sound device driver:** the sounddevice library in python doesnt work well with edge devices
+* **database:** currently our system only saves, 1 and only 1 face locally. we should have made a database system on cloud and allow for multiple faces stored to do face recognition.
