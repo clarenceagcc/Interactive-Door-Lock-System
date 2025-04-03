@@ -3,7 +3,11 @@
 A Raspberry Pi-based electronic door lock system using facial recognition, wake word detection, and ultrasonic presence sensing for enhanced security and convenience.
 
 
-![Main UI](images/system1.png) ![Dashboard Main Page](images/system2.PNG) ![Dashboard_Logs](images/system3.PNG)
+<div style="display: flex; justify-content: space-between; gap: 10px;">
+  <img src="images/system1.png" alt="Main UI" style="width: 10%; height: auto;"/>
+  <img src="images/system2.PNG" alt="Dashboard Main Page" style="width: 30%; height: auto;"/>
+  <img src="images/system3.PNG" alt="Dashboard_Logs" style="width: 30%; height: auto;"/>
+</div>
 
 
 [Preview the DEVLOG.md to view our changes history](DEVLOG.md)
