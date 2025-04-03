@@ -30,10 +30,10 @@
     * **Threading Implementation:** Due to the need to run certain processes concurrently (like live camera feed processing, audio analysis, and sensor monitoring) without freezing the UI, we had to implement threading. This allowed us to maintain a responsive user interface while background tasks were being executed. This was especially important for the live camera display and audio analysis which would otherwise cause the UI to become unresponsive.
  
 ## Application Jusitification
-* **Ordering of running model:** Power efficiency, because the face recognition model uses the most power compared to the wake word model. since we have to consider real world usage, if the face recognition model is being ran first, before the mic, it will consume more power.
+* **Ordering of running model:** The face recognition model, due to its higher computational intensity, consumes significantly more power than the wake word detection model. To minimize overall energy usage in real-world scenarios, the system prioritizes executing the face recognition model first. This strategy ensures that power-intensive processing is completed before the microphone is activated, leading to a more efficient power profile.
 
 
-## limitations
-* **face recognition:** if there are multiple faces in the frame being processed, it should show unrecognized, but currently, our system doesnt do this.
-* **sound device driver:** the sounddevice library in python doesnt work well with edge devices
-* **database:** currently our system only saves, 1 and only 1 face locally. we should have made a database system on cloud and allow for multiple faces stored to do face recognition.
+## Limitations
+* **Multi-Face Ambiguity in Face Recognition:** The current implementation lacks robust handling of scenarios with multiple faces within the camera's field of view. Instead of accurately identifying and flagging such instances as "unrecognized" due to ambiguity, the system may produce unpredictable or erroneous results.
+* **Edge Device Compatibility with Sound Device Driver:** The sounddevice Python library exhibits compatibility issues with edge devices, potentially leading to unreliable audio capture and processing. This limitation may hinder the system's performance in real-world deployments on resource-constrained hardware.
+* **Scalability and Multi-User Support via Local Database Constraint:** The system's reliance on a local database for face storage restricts its scalability and multi-user capabilities. A cloud-based database architecture should be implemented to enable the storage and management of multiple user profiles, facilitating robust and scalable face recognition functionality.
